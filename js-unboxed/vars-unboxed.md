@@ -1,181 +1,169 @@
+Coming from a Java and Bash background, diving deeper into JavaScript and React has been a deeply... **humbling** experience.
+
+The other day, I hit a bug that had me staring blankly at my monitor for 10 straight minutes. Here is the simplified version:
+
+```javascript
+function RenderComponent() {
+    var a = getValue(); // Returned 'value1'
+    
+    // ... 30 lines of me and Claude arguing ...
+    
+    setState(a); // 'a' somehow became 'value2' here?!
+}
+
+```
+
+My Java brain immediately scanned the middle 30 lines for a simple reassignment like `a = getValue(...)`. Seeing none, I was convinced JavaScript was gaslighting me.
+
+*(In my defense, to save tokens I only pasted a fraction of the function to Claude, so we were both just confidently wrong together. Definitely blaming Claude for this one. 😉)*
+
+Then I spotted the culprit right under my nose:
+
+```javascript
+if (condition) {
+    var a = getSomeOtherValue(); // 'value2'
+}
+
+```
+
+In Java, re-declaring `a` inside an `if` block triggers a compile-time error. In JavaScript, `var` just laughs in the face of block scopes due to **hoisting** and **function scoping**:
+
+1. **`var` Ignores Blocks:** An `if` block isn't a boundary for `var`. It attaches itself straight to the nearest function scope.
+2. **Re-declarations Are Valid:** Declaring `var a` a second time doesn't create a fresh variable in memory—it just re-declares and re-assigns the exact same function-scoped `a`.
 
 ---
 
-### Execution Context & Its Components
+Swipe through the slides for a quick breakdown of how `var` handles memory vs. modern `let`/`const`!
 
-An **Execution Context (EC)** is the abstract environment in which JavaScript code is evaluated and executed. Every piece of running code executes inside an execution context.
+What was the first JS quirk that made your Java/C++ brain completely short-circuit? 
 
-There are two primary types of execution contexts:
+---  
+Lets starts with Execution context and it's components
 
-* **Global Execution Context (GEC):** Created once when the script first runs. It wraps all top-level (non-function) code.
-* **Function Execution Context (FEC):** Created fresh every single time a function is called.
+An execution context is the environment in which JS code runs. Every piece of running code executes inside one.
 
-#### Structure of an Execution Context
+- Global Execution Context (GEC) — created once, when the script starts. Wraps all top-level code.
+- Function Execution Context (FEC) — created fresh every time a function is called.
 
-Conceptually, an Execution Context holds three main internal components:
+Structure of an EC
 
 ```
 Execution Context
-├── [[LexicalEnvironment]]
+├── [[LexicalEnvironment]] 
 ├── [[VariableEnvironment]]
 └── [[ThisValue]]
-
 ```
+Each EC goes through two phases:
 
-> **Key Mechanism:** These three components do not store bindings or values directly. Instead, `[[LexicalEnvironment]]` and `[[VariableEnvironment]]` act as **pointers** (references) to an internal ECMAScript spec structure called an **Environment Record (ER)**.
+1. Creation phase (before any code runs):
+   - `var` variables are hoisted and initialized to `undefined`
+   - `let`/`const` are hoisted but left **uninitialized** (temporal dead zone)
+   - Function declarations are hoisted with their full body (fully callable before their line)
+   - `this` is determined
+2. Execution phase — code runs line by line, real values get assigned.
 
-The **Environment Record** is the actual memory allocation unit that holds variable names, function declarations, and their associated values or bindings.
+
+Now here each component does not store anything in them they are just pointers to an ECMAScript spec called
+[[EnvironmentRecord]] The fact that the three components does not store anything themselevs but point to an ER is a very important mechanism.
 
 ```
 Execution Context
-├── [[LexicalEnvironment]]  ───► [ EnvironmentRecord_1 ]
-├── [[VariableEnvironment]] ───► [ EnvironmentRecord_1 ]
+├── [[LexicalEnvironment]]    -> [ER_1]
+├── [[VariableEnvironment]]   -> [ER_1]
 └── [[ThisValue]]
-
 ```
 
+The [[EnvironmentRecord]] is the actual block that stores function definitions and variables along with it's values.
 ---
 
-### The Two Execution Phases
+var getting hoisted.
 
-When code enters an execution context, it runs in two distinct phases:
+We have heard this term time and time again but what does this translate to our code execution?
 
-1. **Creation Phase (Compilation/Parsing):**
-* `var` variables are registered in the Environment Record and initialized to `undefined` (hoisted).
-* `let` and `const` variables are registered in the Environment Record but left **uninitialized** (entering the Temporal Dead Zone).
-* Function declarations are hoisted along with their complete body and bound immediately.
-* The value of `this` (`[[ThisValue]]`) is evaluated and bound.
-
-
-2. **Execution Phase:**
-* The engine executes code line by line.
-* Assignments occur, and real values replace initial values or uninitialized states.
-
-
-
----
-
-### `var` Hoisting & Scope Contamination
-
-`var` statements are scoped to the nearest **Function Scope** (or Global Scope) and ignore block constructs like `if`, `for`, or `{}`.
-
-* `var` bindings are **always** written to the Environment Record referenced by `[[VariableEnvironment]]`.
-
-#### Example Code
-
+Let us take an example code
 ```js
 function Main() {
     var x = 100;
     if (true) {
         var x = "Dummy";
-        console.log(x); // "Dummy"
+        console.log(x);
     }
-    console.log(x);     // "Dummy"
+    console.log(x);
 }
-Main();
-
 ```
+[Note] Remember var variables are written into [[VariableEnvironment]] (NO MATTER WHAT!)
 
-#### What Happens Under the Hood?
+In the creation phase when a `var` variable is encountered it is written to the [[EnvironmentRecord]] that [[VariableEnvironment]] points to.
 
-1. **Creation Phase of `Main()`:**
-Both `[[LexicalEnvironment]]` and `[[VariableEnvironment]]` point to the same outer function-level Environment Record (`ER_1`). `x` is hoisted and initialized to `undefined`.
+In the function above we get a EC like this
 ```
-Execution Context (Main)
-├── [[LexicalEnvironment]]  ──► [ ER_1 { x: undefined } ]
-├── [[VariableEnvironment]] ──► [ ER_1 { x: undefined } ]
+Execution Context
+├── [[LexicalEnvironment]]  -> [ER_1 [x=100]] (Since both are pointing to same object, java people got a neuron activation or PTSD)
+├── [[VariableEnvironment]] -> [ER_1 [x=100]]
 └── [[ThisValue]]
-
 ```
 
+Now even if we have a another `var x = "Dummy"` js engine simply rewrites the x value already in [[VariableEnvironment]]
 
-2. **Execution Phase (`var x = 100`):**
-`x` is assigned `100` in `ER_1`.
-3. **Inside the `if (true)` block:**
-Because `var` ignores block boundaries, the engine looks at `var x = "Dummy"` and targets the same `[[VariableEnvironment]]` (`ER_1`). It overwrites the existing key `x` in `ER_1`.
+So now we get
+
 ```
-Execution Context (Main)
-├── [[LexicalEnvironment]]  ──► [ ER_1 { x: "Dummy" } ]
-├── [[VariableEnvironment]] ──► [ ER_1 { x: "Dummy" } ]
+Execution Context
+├── [[LexicalEnvironment]]  -> [ER_1 [x="Dummy"]]
+├── [[VariableEnvironment]] -> [ER_1 [x="Dummy"]]
 └── [[ThisValue]]
-
 ```
-
-
-4. **Logging `x`:**
-Both `console.log(x)` calls perform identifier resolution using `[[LexicalEnvironment]]` (which points to `ER_1`). Consequently, both output `"Dummy"`.
-
 ---
 
-### Block Scoping with `let` and `const`
+Now when the time comes when we need the value of `x` JS engine looks for it in [[LexicalEnvironment]]
+Which points to ER_1 where value of x got updated to "Dummy".
 
-To preserve scope isolated inside a block, block-scoped declarations (`let` and `const`) are used.
+So how do we keep the value defined in a scope within itslef ? by using let or const.
 
-#### Refactored Example Code
+How does it change things internally? 
 
+if we update our code to
 ```js
 function Main() {
     var x = 100;
     if (true) {
         let x = "Dummy";
-        console.log(x); // "Dummy"
+        console.log(x);
     }
-    console.log(x);     // 100
+    console.log(x);
 }
-Main();
-
 ```
 
-#### What Happens Under the Hood?
+Our EC becomes like
 
-1. **Initial Setup inside `Main()`:**
-`ER_1` holds the function-scoped variable `x = 100`.
 ```
-Execution Context (Main)
-├── [[LexicalEnvironment]]  ──► [ ER_1 { x: 100 } ]
-├── [[VariableEnvironment]] ──► [ ER_1 { x: 100 } ]
+Execution Context
+├── [[LexicalEnvironment]]  -> [ER_1 [x=100]]
+├── [[VariableEnvironment]] -> [ER_1 [x=100]]
 └── [[ThisValue]]
-
 ```
 
-
-2. **Entering the Block (`if` block):**
-When the engine encounters block-scoped bindings (`let`/`const`) inside a block:
-* It creates a **new Block Environment Record** (`ER_2`).
-* `ER_2` sets its internal `[[OuterEnv]]` reference pointing back to `ER_1`.
-* `[[LexicalEnvironment]]` is temporarily updated to point to **`ER_2`**.
-* `[[VariableEnvironment]]` remains pointing to **`ER_1`** (function scope).
-
+When js engine encounters a let/const variable inside a block it creates a new [[EnvironmentRecord]] and our [[LexicalEnvironment]] points to this new entry. So doesn't the lookup for x fail if [[VariableEnvironment]] is reassigned. No every [[EnvironmentRecord]] has a pointer called __outer__ this one will point to the old ER that [[VariableEnvironment]] was pointing to. So now we have
 
 ```
-Execution Context (Main - Inside Block)
-├── [[LexicalEnvironment]]  ──► [ ER_2 { x: "Dummy" }, [[OuterEnv]] ──► ER_1 ]
-├── [[VariableEnvironment]] ──► [ ER_1 { x: 100 } ]
+Execution Context
+├── [[LexicalEnvironment]]  -> [ER_1 [x=100]]
+├── [[VariableEnvironment]] -> [ER_2 [x="dummy"], __outer__ -> ER_1]
 └── [[ThisValue]]
-
 ```
-
-
-3. **Evaluating First `console.log(x)`:**
-The engine looks up `x` starting at `[[LexicalEnvironment]]` (`ER_2`). It finds `x = "Dummy"` and prints `"Dummy"`. If `x` were not defined in `ER_2`, it would follow `[[OuterEnv]]` up to `ER_1`.
-4. **Exiting the Block:**
-Upon exiting the block, `ER_2` goes out of scope. The engine restores `[[LexicalEnvironment]]` back to `ER_1`.
-```
-Execution Context (Main - After Block)
-├── [[LexicalEnvironment]]  ──► [ ER_1 { x: 100 } ]
-├── [[VariableEnvironment]] ──► [ ER_1 { x: 100 } ]
-└── [[ThisValue]]
-
-```
-
-
-5. **Evaluating Second `console.log(x)`:**
-`[[LexicalEnvironment]]` points to `ER_1`, resolving `x` to `100`. The outer variable remained completely untouched.
-
 ---
 
-### Summary Rules
+Now we come to our logging inside the block and the lookup resolves `x` value from ER_2 and prints "dummy"
+Now the block has terminated and it is removed so our EC is back to it's inital  state
 
-* **`[[VariableEnvironment]]`** manages function-scoped bindings (`var` and function declarations).
-* **`[[LexicalEnvironment]]`** manages block-scoped bindings (`let`, `const`, `class`) and tracks active block context changes via a chain of `[[OuterEnv]]` pointers.
-* New Environment Records are dynamically attached to `[[LexicalEnvironment]]` upon entering block statements containing `let` or `const`.
+```
+Execution Context
+├── [[LexicalEnvironment]]  -> [ER_1 [x=100]]
+├── [[VariableEnvironment]] -> [ER_1 [x=100]]
+└── [[ThisValue]]
+```
+
+Now when we encounter 2nd console.log(x) it is resolved to x=100. (We preserved var value successfully).
+
+note: This new ER creation is done only when let and const are used, all declarative functions, vars are hoisted meaning they are sent to [[VariableEnvironment]].
+---
